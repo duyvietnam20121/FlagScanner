@@ -172,6 +172,7 @@ struct ScanStats {
     size_t  stringsFound    = 0;
     size_t  flagsTotal      = 0;
     size_t  duplicatesSkipped = 0;
+    uintptr_t flagListRVA   = 0;  // RVA thực tế của FFlagList đã dùng
     std::chrono::milliseconds elapsed{0};
     std::unordered_map<std::string, int> typeCounts;
 
@@ -189,6 +190,7 @@ struct ScanStats {
 struct DumpResult {
     std::vector<FlagEntry>  flags;
     ScanStats               stats;
+    std::string             clientVersion;  // "version-ad5d3e2906444472"
     bool                    success = false;
     std::string             error;
 

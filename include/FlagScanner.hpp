@@ -10,6 +10,7 @@
 #include "ProcessHandle.hpp"
 #include "PatternMatcher.hpp"
 #include "FlagListWalker.hpp"
+#include "VersionReader.hpp"
 #include "Logger.hpp"
 
 // ============================================================
@@ -126,6 +127,10 @@ private:
                  module.name.c_str(), module.base,
                  module.size / 1048576.0);
 
+        // ── Đọc ClientVersion từ memory ──────────────────
+        result.clientVersion = VersionReader::read(proc, module.base, module.size);
+        LOG_INFO("Version: %s", result.clientVersion.c_str());
+
         // ── METHOD A: FlagListWalker (primary) ───────────
         bool walkerSucceeded = false;
         if (walkerCfg_.enabled) {
@@ -134,8 +139,9 @@ private:
             auto flags = walker.walkAll(proc, module.base, config_.prefixes);
 
             if (!flags.empty()) {
-                result.flags     = std::move(flags);
-                walkerSucceeded  = true;
+                result.flags              = std::move(flags);
+                result.stats.flagListRVA  = walkerCfg_.offsets.FFlagListRVA;
+                walkerSucceeded           = true;
                 LOG_OK("Method A: %zu flags", result.flags.size());
             } else {
                 LOG_WARN("Method A: 0 flags — RVA mungkin sudah berubah");
