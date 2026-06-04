@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <conio.h>      // _getch()
 #include <Windows.h>
 
 #include "include/FlagTypes.hpp"
@@ -87,8 +88,38 @@ static void listProcesses() {
     CloseHandle(snap);
 }
 
+// ── ensureConsole: luôn hiện cửa sổ terminal ─────────────
+// Cần thiết khi exe bị double-click hoặc spawn từ app khác
+// mà không có console window sẵn
+static void ensureConsole() {
+    // Thử attach vào console của process cha trước
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+        // Redirect stdout/stderr sang console vừa attach
+        FILE* fp = nullptr;
+        freopen_s(&fp, "CONOUT$", "w", stdout);
+        freopen_s(&fp, "CONOUT$", "w", stderr);
+        freopen_s(&fp, "CONIN$",  "r", stdin);
+        return;
+    }
+    // Không có console cha → tạo cửa sổ console mới
+    if (AllocConsole()) {
+        FILE* fp = nullptr;
+        freopen_s(&fp, "CONOUT$", "w", stdout);
+        freopen_s(&fp, "CONOUT$", "w", stderr);
+        freopen_s(&fp, "CONIN$",  "r", stdin);
+        // Bật ANSI escape codes (Windows 10+)
+        HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        DWORD mode = 0;
+        if (GetConsoleMode(hOut, &mode))
+            SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        // Đặt tiêu đề cửa sổ
+        SetConsoleTitleA("FFlag Scanner v2.0");
+    }
+}
+
 // ── Main ─────────────────────────────────────────────────
 int main(int argc, char* argv[]) {
+    ensureConsole();
     printBanner();
 
     // Thu thập args
@@ -166,6 +197,12 @@ int main(int argc, char* argv[]) {
     printf("\n");
     LOG_OK("Done! %zu FFlags dumped to: %s",
            result.flags.size(), config.outputDir.c_str());
+
+    // Giữ console mở khi double-click (không chạy từ terminal)
+    if (GetConsoleWindow() != nullptr) {
+        printf("\n  Press any key to exit...\n");
+        (void)_getch();
+    }
 
     return 0;
 }
