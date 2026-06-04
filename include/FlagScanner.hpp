@@ -1,4 +1,8 @@
 #pragma once
+// NOMINMAX phải define trước mọi Windows header để chặn macro min/max
+#ifndef NOMINMAX
+#  define NOMINMAX
+#endif
 #include <vector>
 #include <unordered_set>
 #include <chrono>
@@ -163,7 +167,8 @@ private:
         // Đọc region theo chunks để tiết kiệm RAM
         size_t offset = 0;
         while (offset < region.size) {
-            size_t toRead = std::min(config_.chunkSize, region.size - offset);
+            size_t toRead = (config_.chunkSize < region.size - offset)
+                          ? config_.chunkSize : region.size - offset;
             chunkBuf.resize(toRead);
 
             size_t bytesRead = proc.readMemory(region.base + offset,

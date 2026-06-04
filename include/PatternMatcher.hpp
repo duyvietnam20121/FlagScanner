@@ -1,4 +1,8 @@
 #pragma once
+// NOMINMAX phải define trước mọi Windows header để chặn macro min/max
+#ifndef NOMINMAX
+#  define NOMINMAX
+#endif
 #include <vector>
 #include <string>
 #include <string_view>
@@ -118,7 +122,7 @@ public:
                 // Skip dùng bad-char table (chỉ cho byte thực, không wildcard)
                 uint8_t  badByte  = haystack[i + patLen - 1];
                 int      skip     = pattern.badChar[badByte];
-                i += static_cast<size_t>(std::max(1, skip));
+                i += static_cast<size_t>(skip > 1 ? skip : 1);
             }
         }
 

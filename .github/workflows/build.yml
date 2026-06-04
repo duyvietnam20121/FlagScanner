@@ -11,7 +11,7 @@ name: Build FlagScanner
 on:
   push:
     branches: [ main, master, develop ]
-    tags:     [ 'v*.*.*' ]          # v1.0.0, v2.1.3, ...
+    tags:     [ 'v*.*.*' ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
@@ -22,42 +22,31 @@ on:
         default: 'Release'
         type: choice
         options: [ Release, Debug, RelWithDebInfo ]
-      upload_artifact:
-        description: 'Upload build artifact'
-        required: false
-        default: true
-        type: boolean
 
-# Chỉ chạy một workflow mỗi branch cùng lúc, cancel run cũ
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# ─────────────────────────────────────────────────────────────
-#  ENV chung
-# ─────────────────────────────────────────────────────────────
 env:
   BUILD_TYPE: ${{ github.event.inputs.build_type || 'Release' }}
-  ARTIFACT_NAME: FlagScanner-windows-x64
-  EXE_PATH: build/bin
 
 jobs:
   # ───────────────────────────────────────────────────────────
-  #  JOB 1: build — Windows x64, MSVC
+  #  JOB 1: build
   # ───────────────────────────────────────────────────────────
   build:
-    name: Build (${{ github.event.inputs.build_type || 'Release' }}) — Windows x64
+    name: "🔨 Build (${{ github.event.inputs.build_type || 'Release' }}) · Windows x64"
     runs-on: windows-latest
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────
-      - name: Checkout source
+      - name: "📥 Checkout"
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0        # Cần full history để lấy tag version
+          fetch-depth: 0
 
-      # ── 2. Lấy version string từ tag hoặc commit SHA ─────
-      - name: Determine version
+      # ── 2. Version ───────────────────────────────────────
+      - name: "🏷️  Determine version"
         id: version
         shell: bash
         run: |
@@ -68,204 +57,194 @@ jobs:
             VERSION="dev-${SHORT_SHA}"
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Version: ${VERSION}"
 
-      # ── 3. Cache CMake build ─────────────────────────────
-      - name: Cache CMake build directory
+          # Console banner
+          echo ""
+          echo "┌─────────────────────────────────────────┐"
+          echo "│  FFlag Scanner  ·  CI Build             │"
+          echo "│  Version  : ${VERSION}"
+          echo "│  Config   : ${{ env.BUILD_TYPE }}"
+          echo "│  Commit   : ${GITHUB_SHA::8}"
+          echo "└─────────────────────────────────────────┘"
+          echo ""
+
+      # ── 3. Cache ─────────────────────────────────────────
+      - name: "♻️  Cache CMake build"
         uses: actions/cache@v4
         with:
           path: build
           key: cmake-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'include/**/*.hpp') }}
-          restore-keys: |
-            cmake-${{ runner.os }}-
+          restore-keys: cmake-${{ runner.os }}-
 
-      # ── 4. Configure CMake ───────────────────────────────
-      - name: Configure CMake
+      # ── 4. Configure ─────────────────────────────────────
+      - name: "⚙️  Configure CMake"
         shell: bash
         run: |
+          echo "::group::CMake configure output"
           cmake -B build \
             -G "Visual Studio 17 2022" \
             -A x64 \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DCMAKE_CONFIGURATION_TYPES=${{ env.BUILD_TYPE }}
+          echo "::endgroup::"
 
       # ── 5. Build ─────────────────────────────────────────
-      - name: Build
+      - name: "🏗️  Build"
         shell: bash
         run: |
+          echo "::group::MSBuild output"
           cmake --build build \
             --config ${{ env.BUILD_TYPE }} \
-            --parallel $(nproc 2>/dev/null || echo 4)
+            --parallel 4 \
+            -- /nologo /consoleloggerparameters:Summary
+          echo "::endgroup::"
 
-      # ── 6. Verify output ─────────────────────────────────
-      - name: Verify binary exists
+      # ── 6. Verify ────────────────────────────────────────
+      - name: "✅ Verify binary"
         shell: bash
         run: |
-          EXE="${{ env.EXE_PATH }}/${{ env.BUILD_TYPE }}/FlagScanner.exe"
+          EXE="build/bin/${{ env.BUILD_TYPE }}/FlagScanner.exe"
           if [ ! -f "$EXE" ]; then
-            echo "ERROR: Binary not found at $EXE"
-            find build -name "*.exe" 2>/dev/null
+            echo "::error::Binary not found at $EXE"
+            echo "Files found:"
+            find build -name "*.exe" 2>/dev/null || echo "  (none)"
             exit 1
           fi
-          echo "Binary found: $EXE"
-          ls -lh "$EXE"
+          SIZE=$(du -h "$EXE" | cut -f1)
+          echo "::notice::Binary OK · ${SIZE} · ${EXE}"
 
-      # ── 7. Smoke test: --help phải exit 0 ────────────────
-      - name: Smoke test (--help)
+      # ── 7. Smoke test ────────────────────────────────────
+      - name: "🚬 Smoke test (--help)"
         shell: cmd
         run: |
+          echo.
+          echo === Smoke test: --help ===
           build\bin\${{ env.BUILD_TYPE }}\FlagScanner.exe --help
           if %ERRORLEVEL% NEQ 0 (
-            echo Smoke test failed
+            echo ::error::Smoke test failed with exit code %ERRORLEVEL%
             exit /b 1
           )
+          echo === Smoke test PASSED ===
 
-      # ── 8. Đóng gói artifact ─────────────────────────────
-      - name: Package artifact
-        if: ${{ github.event.inputs.upload_artifact != 'false' }}
-        shell: bash
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          PKG_DIR="dist/FlagScanner-${VERSION}-windows-x64"
-          mkdir -p "$PKG_DIR"
-
-          # Exe
-          cp "${{ env.EXE_PATH }}/${{ env.BUILD_TYPE }}/FlagScanner.exe" "$PKG_DIR/"
-
-          # Header files (cho người dùng integrate vào project riêng)
-          cp -r include/                     "$PKG_DIR/include/"
-
-          # Docs
-          cp README.md                       "$PKG_DIR/"
-          cp CMakeLists.txt                  "$PKG_DIR/"
-
-          # Version file
-          echo "Version: ${VERSION}"                         > "$PKG_DIR/VERSION.txt"
-          echo "Build:   ${{ env.BUILD_TYPE }}"             >> "$PKG_DIR/VERSION.txt"
-          echo "Commit:  ${{ github.sha }}"                 >> "$PKG_DIR/VERSION.txt"
-          echo "Date:    $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$PKG_DIR/VERSION.txt"
-
-          # Zip
-          cd dist
-          7z a "../${{ env.ARTIFACT_NAME }}-${VERSION}.zip" "FlagScanner-${VERSION}-windows-x64/"
-          cd ..
-          ls -lh "${{ env.ARTIFACT_NAME }}-${VERSION}.zip"
-          echo "pkg_zip=${{ env.ARTIFACT_NAME }}-${VERSION}.zip" >> "$GITHUB_ENV"
-
-      # ── 9. Upload artifact (mọi build) ───────────────────
-      - name: Upload build artifact
-        if: ${{ github.event.inputs.upload_artifact != 'false' }}
+      # ── 8. Upload artifact (exe + headers, không zip) ────
+      - name: "📤 Upload artifact"
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}-${{ steps.version.outputs.version }}
-          path: ${{ env.pkg_zip }}
+          name: FlagScanner-${{ steps.version.outputs.version }}-windows-x64
+          # Upload thẳng folder, GitHub tự nén khi download
+          path: |
+            build/bin/${{ env.BUILD_TYPE }}/FlagScanner.exe
+            include/
+            README.md
+            CMakeLists.txt
           retention-days: 30
           if-no-files-found: error
 
-      # ── 10. Build summary ────────────────────────────────
-      - name: Write build summary
+      # ── 9. Build summary ─────────────────────────────────
+      - name: "📋 Build summary"
         if: always()
         shell: bash
         run: |
-          echo "## FlagScanner Build Summary" >> "$GITHUB_STEP_SUMMARY"
-          echo ""                              >> "$GITHUB_STEP_SUMMARY"
-          echo "| Key | Value |"              >> "$GITHUB_STEP_SUMMARY"
-          echo "|-----|-------|"              >> "$GITHUB_STEP_SUMMARY"
-          echo "| Version     | \`${{ steps.version.outputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Build type  | \`${{ env.BUILD_TYPE }}\`  |"               >> "$GITHUB_STEP_SUMMARY"
-          echo "| Runner      | \`${{ runner.os }} ${{ runner.arch }}\` |"  >> "$GITHUB_STEP_SUMMARY"
-          echo "| Commit      | \`${{ github.sha }}\`      |"               >> "$GITHUB_STEP_SUMMARY"
-          echo "| Triggered   | \`${{ github.event_name }}\` |"             >> "$GITHUB_STEP_SUMMARY"
+          STATUS="${{ job.status }}"
+          ICON="✅"
+          [ "$STATUS" != "success" ] && ICON="❌"
+
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          ## ${ICON} FlagScanner Build — ${{ steps.version.outputs.version }}
+
+          | | |
+          |---|---|
+          | **Status**    | ${STATUS} |
+          | **Version**   | \`${{ steps.version.outputs.version }}\` |
+          | **Config**    | \`${{ env.BUILD_TYPE }}\` |
+          | **Runner**    | \`${{ runner.os }} · ${{ runner.arch }}\` |
+          | **Commit**    | \`${{ github.sha }}\` |
+          | **Trigger**   | \`${{ github.event_name }}\` |
+          EOF
 
   # ───────────────────────────────────────────────────────────
   #  JOB 2: release — chỉ chạy khi push tag vX.Y.Z
   # ───────────────────────────────────────────────────────────
   release:
-    name: Create GitHub Release
+    name: "🚀 GitHub Release"
     needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-
-    # Cần quyền tạo release
     permissions:
       contents: write
 
     steps:
-      # ── 1. Lấy version từ tag ────────────────────────────
-      - name: Get version from tag
+      - name: "🏷️  Get version"
         id: version
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          IS_PRE=$( [[ "$VERSION" == *"-"* ]] && echo true || echo false )
+          echo "prerelease=${IS_PRE}" >> "$GITHUB_OUTPUT"
 
-      # ── 2. Download artifact từ job build ────────────────
-      - name: Download artifact
+      - name: "📥 Download artifact"
         uses: actions/download-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}-${{ steps.version.outputs.version }}
-          path: dist/
+          name: FlagScanner-${{ steps.version.outputs.version }}-windows-x64
+          path: release-files/
 
-      # ── 3. Tạo GitHub Release với changelog ──────────────
-      - name: Create Release
+      - name: "🚀 Create Release"
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.version }}
           name: "FlagScanner ${{ steps.version.outputs.version }}"
-          draft: false
-          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
-          generate_release_notes: true   # Tự generate notes từ commits
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          generate_release_notes: true
           body: |
             ## FlagScanner ${{ steps.version.outputs.version }}
 
-            ### Download
-            Tải file `.zip` bên dưới, giải nén và chạy:
+            ### Cài đặt
+            1. Tải file từ **Assets** bên dưới
+            2. Giải nén, chạy với quyền Administrator:
             ```
             FlagScanner.exe --help
             FlagScanner.exe --verbose --outdir ./output
             ```
 
-            ### Requirements
+            ### Yêu cầu
             - Windows 10/11 x64
-            - Run as Administrator (cần quyền đọc process memory)
+            - Administrator (cần đọc process memory)
 
             ### Build info
-            - Compiler: MSVC (Visual Studio 2022)
-            - Standard: C++20
-            - Config: Release + /O2
-
-          files: dist/*.zip
+            - Compiler : MSVC 2022 · C++20
+            - Config   : Release · /O2 · /W4 /WX
+          files: release-files/**
 
   # ───────────────────────────────────────────────────────────
-  #  JOB 3: lint — kiểm tra code style (mọi PR)
+  #  JOB 3: lint — kiểm tra clang-format trên PR
   # ───────────────────────────────────────────────────────────
   lint:
-    name: Lint (clang-format check)
+    name: "🧹 clang-format check"
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
 
     steps:
-      - name: Checkout
+      - name: "📥 Checkout"
         uses: actions/checkout@v4
 
-      - name: Install clang-format
+      - name: "🔧 Install clang-format"
         run: |
           sudo apt-get update -q
           sudo apt-get install -y clang-format-17
 
-      - name: Check formatting
+      - name: "🧹 Check formatting"
         run: |
-          # Kiểm tra tất cả .hpp và .cpp
-          FILES=$(find . -name "*.hpp" -o -name "*.cpp" | grep -v build/)
+          FILES=$(find . -path ./build -prune -o \( -name "*.hpp" -o -name "*.cpp" \) -print)
           FAIL=0
           for f in $FILES; do
             if ! clang-format-17 --dry-run --Werror "$f" 2>/dev/null; then
-              echo "  Needs formatting: $f"
+              echo "::warning file=${f}::Needs clang-format"
               FAIL=1
             fi
           done
           if [ $FAIL -eq 1 ]; then
-            echo ""
-            echo "Run: clang-format -i \$(find . -name '*.hpp' -o -name '*.cpp')"
+            echo "::error::Some files need formatting. Run:"
+            echo "  clang-format -i \$(find . -name '*.hpp' -o -name '*.cpp')"
             exit 1
           fi
-          echo "All files formatted correctly."
+          echo "All files formatted correctly ✅"
