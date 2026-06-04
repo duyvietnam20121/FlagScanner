@@ -93,10 +93,7 @@ jobs:
         shell: bash
         run: |
           echo "::group::MSBuild output"
-          cmake --build build \
-            --config ${{ env.BUILD_TYPE }} \
-            --parallel 4 \
-            -- /nologo /consoleloggerparameters:Summary
+          cmake --build build --config ${{ env.BUILD_TYPE }} --parallel 4
           echo "::endgroup::"
 
       # ── 6. Verify ────────────────────────────────────────
