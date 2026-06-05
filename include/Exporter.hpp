@@ -48,8 +48,7 @@ public:
             ok &= exportCsv(result, config.outputDir + "/" + stem + ".csv");
 
         if (config.exportCppHeader)
-            ok &= exportCppHeader(result, config.outputDir + "/" + stem + "_offsets.hpp",
-                                  config.processName);
+            ok &= exportCppHeader(result, config.outputDir + "/" + stem + "_offsets.hpp");
 
         return ok;
     }
@@ -145,8 +144,7 @@ public:
     //  C++ Header export — offsets dùng trực tiếp trong code
     // ────────────────────────────────────────────────────
     static bool exportCppHeader(const DumpResult& result,
-                                  const std::string& path,
-                                  const std::string& processName = "")
+                                  const std::string& path)
     {
         std::ofstream f(path);
         if (!f) {
